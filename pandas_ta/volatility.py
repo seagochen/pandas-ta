@@ -105,55 +105,140 @@ def atr(high, low, close, length=None, mamode=None, drift=None, offset=None, **k
     return atr
 
 
+# ----- Obsolete Code -----
+# def bbands(close, length=None, std=None, mamode=None, offset=None, **kwargs):
+#     """Indicator: Bollinger Bands (BBANDS)"""
+#     # Validate arguments
+#     close = verify_series(close)
+#     length = int(length) if length and length > 0 else 20
+#     min_periods = int(kwargs['min_periods']) if 'min_periods' in kwargs and kwargs['min_periods'] is not None else length
+#     std = float(std) if std and std > 0 else 2
+#     mamode = mamode.lower() if mamode else 'ema'
+#     offset = get_offset(offset)
+
+#     # Calculate Result
+#     standard_deviation = stdev(close=close, length=length)
+#     # std = variance(close=close, length=length).apply(np.sqrt)
+
+#     if mamode is None or mamode == 'sma':
+#         mid = close.rolling(length, min_periods=min_periods).mean()
+#     elif mamode == 'ema':
+#         mid = close.ewm(span=length, min_periods=min_periods).mean()
+
+#     lower = mid - std * standard_deviation
+#     upper = mid + std * standard_deviation
+
+#     # Offset
+#     if offset != 0:
+#         lower = lower.shift(offset)
+#         mid = mid.shift(offset)
+#         upper = upper.shift(offset)
+
+#     # Handle fills
+#     if 'fillna' in kwargs:
+#         lower.fillna(kwargs['fillna'], inplace=True)
+#         mid.fillna(kwargs['fillna'], inplace=True)
+#         upper.fillna(kwargs['fillna'], inplace=True)
+#     if 'fill_method' in kwargs:
+#         lower.fillna(method=kwargs['fill_method'], inplace=True)
+#         mid.fillna(method=kwargs['fill_method'], inplace=True)
+#         upper.fillna(method=kwargs['fill_method'], inplace=True)
+
+#     # Name and Categorize it
+#     lower.name = f"BBL_{length}"
+#     mid.name = f"BBM_{length}"
+#     upper.name = f"BBU_{length}"
+#     mid.category = upper.category = lower.category = 'volatility'
+
+#     # Prepare DataFrame to return
+#     data = {lower.name: lower, mid.name: mid, upper.name: upper}
+#     bbandsdf = pd.DataFrame(data)
+#     bbandsdf.name = f"BBANDS_{length}"
+#     bbandsdf.category = 'volatility'
+
+#     return bbandsdf
+
+
 def bbands(close, length=None, std=None, mamode=None, offset=None, **kwargs):
     """Indicator: Bollinger Bands (BBANDS)"""
     # Validate arguments
     close = verify_series(close)
     length = int(length) if length and length > 0 else 20
-    min_periods = int(kwargs['min_periods']) if 'min_periods' in kwargs and kwargs['min_periods'] is not None else length
-    std = float(std) if std and std > 0 else 2
-    mamode = mamode.lower() if mamode else 'ema'
+    min_periods = int(kwargs.get('min_periods', length)) # Use kwargs.get for min_periods
+    std_multiplier = float(std) if std and std > 0 else 2.0 # std is the multiplier
+    mamode = str(mamode).lower() if mamode else 'ema' # Ensure mamode is a string before .lower()
     offset = get_offset(offset)
 
-    # Calculate Result
-    standard_deviation = stdev(close=close, length=length)
-    # std = variance(close=close, length=length).apply(np.sqrt)
+    # Use stdev to calculate standard deviation
+    standard_deviation = stdev(close=close, length=length, min_periods=min_periods)
 
-    if mamode is None or mamode == 'sma':
-        mid = close.rolling(length, min_periods=min_periods).mean()
+    # Calculate midline based on mamode
+    if mamode == 'sma':
+        mid = close.rolling(window=length, min_periods=min_periods).mean()
     elif mamode == 'ema':
-        mid = close.ewm(span=length, min_periods=min_periods).mean()
+        mid = close.ewm(span=length, min_periods=min_periods, adjust=False).mean() # adjust=False is common for TA EMA
+    else: # Default or unrecognized mamode could default to sma or raise error
+        mid = close.rolling(window=length, min_periods=min_periods).mean()
 
-    lower = mid - std * standard_deviation
-    upper = mid + std * standard_deviation
+    # Calculate lower and upper bands
+    lower = mid - std_multiplier * standard_deviation
+    upper = mid + std_multiplier * standard_deviation
+
+    # Calculate %B (Percent B, referred to as BBP by user)
+    # %B = (Price - Lower Band) / (Upper Band - Lower Band)
+    band_width = upper - lower
+    percent_b = (close - lower) / band_width
+
+    # Handle cases where band_width is 0 (i.e., upper == lower == mid)
+    # This occurs when standard_deviation is 0.
+    # If close == mid, then (close - lower) is 0. percent_b becomes 0/0 => NaN. Should be 0.5.
+    # If close != mid (unlikely if std_dev is 0 unless data issue), then (non-zero)/0 => inf.
+    # Setting to 0.5 in all band_width == 0 cases is a common simplification.
+    percent_b.loc[band_width == 0] = 0.5
+    # Alternative for inf values if not caught by above:
+    # percent_b.replace([np.inf, -np.inf], np.nan, inplace=True) # Then fillna handles it or set specific values
 
     # Offset
     if offset != 0:
         lower = lower.shift(offset)
         mid = mid.shift(offset)
         upper = upper.shift(offset)
+        percent_b = percent_b.shift(offset) # Shift %B along with bands
 
     # Handle fills
     if 'fillna' in kwargs:
-        lower.fillna(kwargs['fillna'], inplace=True)
-        mid.fillna(kwargs['fillna'], inplace=True)
-        upper.fillna(kwargs['fillna'], inplace=True)
+        fillna_val = kwargs['fillna']
+        lower.fillna(fillna_val, inplace=True)
+        mid.fillna(fillna_val, inplace=True)
+        upper.fillna(fillna_val, inplace=True)
+        percent_b.fillna(fillna_val, inplace=True)
     if 'fill_method' in kwargs:
-        lower.fillna(method=kwargs['fill_method'], inplace=True)
-        mid.fillna(method=kwargs['fill_method'], inplace=True)
-        upper.fillna(method=kwargs['fill_method'], inplace=True)
+        fill_method_val = kwargs['fill_method']
+        lower.fillna(method=fill_method_val, inplace=True)
+        mid.fillna(method=fill_method_val, inplace=True)
+        upper.fillna(method=fill_method_val, inplace=True)
+        percent_b.fillna(method=fill_method_val, inplace=True)
 
     # Name and Categorize it
-    lower.name = f"BBL_{length}"
-    mid.name = f"BBM_{length}"
-    upper.name = f"BBU_{length}"
+    # Using std_multiplier value in the name for clarity
+    lower.name = f"BBL_{length}_{std_multiplier}"
+    mid.name = f"BBM_{length}_{std_multiplier}"
+    upper.name = f"BBU_{length}_{std_multiplier}"
+    percent_b.name = f"BBP_{length}_{std_multiplier}" # User requested BBP
+
     mid.category = upper.category = lower.category = 'volatility'
+    percent_b.category = 'oscillator' # %B is typically an oscillator
 
     # Prepare DataFrame to return
-    data = {lower.name: lower, mid.name: mid, upper.name: upper}
+    data = {
+        lower.name: lower,
+        mid.name: mid,
+        upper.name: upper,
+        percent_b.name: percent_b # Add BBP/%B to the DataFrame
+    }
     bbandsdf = pd.DataFrame(data)
-    bbandsdf.name = f"BBANDS_{length}"
-    bbandsdf.category = 'volatility'
+    bbandsdf.name = f"BBANDS_{length}_{std_multiplier}" # DataFrame name can also include std_multiplier
+    bbandsdf.category = 'volatility' # Overall category for the indicator set
 
     return bbandsdf
 

@@ -57,10 +57,11 @@ def ema(close, length=None, offset=None, **kwargs):
 
         seed = close[0:length].mean() if sma else close.iloc[0]
 
-        close[:length - 1] = np.NaN
+        close[:length - 1] = np.nan
         close.iloc[length - 1] = seed
         ma = close[length - 1:].rolling(2, min_periods=2).apply(ema_, raw=False)
-        ema = close[:length].append(ma[1:])
+        #ema = close[:length].append(ma[1:])
+        ema = pd.concat([close[:length], ma[1:]])
 
     # Offset
     if offset != 0:
